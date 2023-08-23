@@ -1,0 +1,22 @@
+{
+  "name": "curswork_internet_technology_server",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "npx nodemon",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.17",
+    "nodemon": "^3.0.1",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.2",
+    "vite": "^4.4.5"
+  },
+  "dependencies": {
+    "@types/node": "^20.5.3",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  }
+}
