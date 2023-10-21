@@ -1,38 +1,42 @@
 import {Router} from "express";
-import PostgresConnector from "../../connector/PostgresConnector";
+import PostgresConnector from "../../connector/PostgresConnector.js";
 import {env} from "node:process";
-import User from "./User";
-import * as jwt from "jsonwebtoken";
+import User from "./User.js";
+import jwt from "jsonwebtoken";
+
+interface stringIndex {
+	[key: string] : any
+}
 
 const userRouter = Router();
 
-const tokenIsValid = (token: string) => {
-	try {
-		return jwt.verify(token, env.SECRET_KEY);
-	} catch (e) {
-		console.error('token error', e);
-		return false;
-	}
-}
-
 userRouter.use(async (req, res, next) => {
-	const token = req.header('Authorization').replace('Bearer ', '');
+	const token = req.header('Authorization')?.replace('Bearer ', '');
 	const reqFingerprint = req.header('Fingerprint');
 
 	if (!token) {
 		return res.status(401).send();
 	}
 
+	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
+		return res.status(500).send('not found user');
+	}
+
+	if (!env.SECRET_KEY) {
+		return res.status(500).send('secret key not found');
+	}
+
 	const db = new PostgresConnector();
 
 	try {
 		db.initUser(env.DB_USER_NAME, env.DB_USER_PASSWORD);
-		const checkResult = tokenIsValid(token);
+		const checkResult = jwt.verify(token, env.SECRET_KEY, {complete: true});
 		console.log('check token', checkResult);
+		const fingerprint: string = typeof checkResult.payload !== 'string' ? checkResult.payload['fingerprint'] : '';
 
-		if (!checkResult || checkResult['fingerprint'] !== reqFingerprint) return res.status(403).send();
+		if (!fingerprint || (fingerprint !== reqFingerprint)) return res.status(403).send();
 
-		const user = new User(token, checkResult['fingerprint'], db);
+		const user = new User(token, fingerprint, db);
 		await user.initUser();
 
 		console.log('Check user', user.isInvalid);
@@ -46,7 +50,7 @@ userRouter.use(async (req, res, next) => {
 		console.error(e);
 		return res.status(401).send();
 	} finally {
-		await db.sql.end();
+		await db.sql?.end();
 	}
 });
 
@@ -54,8 +58,17 @@ userRouter.get('/lists', async (req, res) => {
 	const db = new PostgresConnector();
 	const user = req.app.get('user');
 
+	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
+		return res.status(500).send('not found user');
+	}
+
 	try {
 		db.initUser(env.DB_USER_NAME, env.DB_USER_PASSWORD);
+
+		if (!db.sql) {
+			return res.status(500).send('server error');
+		}
+
 		const sqlResponse = await db.sql`select obj_type_name as name, ot.obj_type_code as to from obj_types ot
 		join role_permission_obj_type rpot on ot.obj_type_id = rpot.obj_type_id
 		join user_roles ur on rpot.role_id = ur.role_id
@@ -70,7 +83,7 @@ userRouter.get('/lists', async (req, res) => {
 		console.error(e);
 		res.status(500);
 	} finally {
-		await db.sql.end();
+		await db.sql?.end();
 	}
 });
 
@@ -83,10 +96,18 @@ userRouter.get('/list-attrs', async (req, res) => {
 		return res.send();
 	}
 
+	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
+		return res.status(500).send('not found user');
+	}
+
 	const db = new PostgresConnector();
 
 	try {
 		db.initUser(env.DB_USER_NAME, env.DB_USER_PASSWORD);
+
+		if (!db.sql) {
+			return res.status(500).send('server error');
+		}
 
 		const [sqlResponse] = await db.sql`select obj_type_code, obj_type_name, ot.obj_type_id 
 		from public.obj_types ot
@@ -95,9 +116,9 @@ userRouter.get('/list-attrs', async (req, res) => {
 		where permision_type = 'visible' and user_id = ${user.userId} and obj_type_code = ${code as string}
 		group by obj_type_code, obj_type_name, ot.obj_type_id;`.execute();
 
-		console.log('check sqlResponse obj type', sqlResponse, sqlResponse['obj_type_id']);
+		console.log('check sqlResponse obj type', sqlResponse);
 
-		if (!sqlResponse['obj_type_id']) {
+		if (!sqlResponse || !sqlResponse['obj_type_id']) {
 			return res.status(404).json({result: 'Not found'});
 		}
 
@@ -113,7 +134,7 @@ userRouter.get('/list-attrs', async (req, res) => {
 
 		console.log('check attrs', getAttrs);
 
-		const attrs = {
+		const attrs: stringIndex = {
 			obj_id: {
 				name: 'ID',
 				order: 0
@@ -132,7 +153,7 @@ userRouter.get('/list-attrs', async (req, res) => {
 		console.error(e);
 		res.status(500).json();
 	} finally {
-		await db.sql.end();
+		await db.sql?.end();
 	}
 });
 
@@ -145,10 +166,19 @@ userRouter.get('/list-data', async (req, res) => {
 		return res.send();
 	}
 
+	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
+		return res.status(500).send('not found user');
+	}
+
 	const db = new PostgresConnector();
 
 	try {
 		db.initUser(env.DB_USER_NAME, env.DB_USER_PASSWORD);
+
+		if (!db.sql) {
+			return res.status(500).send('server error');
+		}
+
 		const [checkResult] = await db.sql`select obj_type_id from public.obj_types where obj_type_code = ${code as string}`.execute();
 
 		if (!checkResult) {
@@ -183,9 +213,9 @@ userRouter.get('/list-data', async (req, res) => {
 		res.status(200).json(objectData);
 	} catch (e) {
 		console.error(e);
-		res.status(500);
+		res.status(500).json({reason: 'server error'});
 	} finally {
-		await db.sql.end();
+		await db.sql?.end();
 	}
 });
 
@@ -197,10 +227,18 @@ userRouter.get('/object-attrs', async (req, res) => {
 		res.status(400).json('invalid queries');
 	}
 
+	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
+		return res.status(500).send('not found user');
+	}
+
 	const db = new PostgresConnector();
 
 	try {
 		db.initUser(env.DB_USER_NAME, env.DB_USER_PASSWORD);
+
+		if (!db.sql) {
+			return res.status(500).send('server error');
+		}
 
 		console.log(user.roleId, code);
 
@@ -216,7 +254,7 @@ userRouter.get('/object-attrs', async (req, res) => {
 		order by ao.order_num;`.values();
 		console.log('check result getAttrs', getAttrs);
 
-		const attrsList = getAttrs.map(([attrCode]) => attrCode);
+		const attrsList = getAttrs.map(([attrCode]: string[]) => attrCode);
 
 		console.log('check result attrsList', attrsList);
 
@@ -242,9 +280,9 @@ userRouter.get('/object-attrs', async (req, res) => {
 
 	} catch (e) {
 		console.error(e)
-		res.status(500).json({reason: 'server error', errorMessage: e.message});
+		res.status(500).json({reason: 'server error', errorMessage: e});
 	} finally {
-		await db.sql.end();
+		await db.sql?.end();
 	}
 });
 
@@ -256,11 +294,24 @@ userRouter.get('/object-data', async (req, res) => {
 		res.status(400).json({reason: 'queries is not valid'});
 	}
 
+	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
+		return res.status(500).send('not found user');
+	}
+
 	const db = new PostgresConnector();
 
 	try {
 		db.initUser(env.DB_USER_NAME, env.DB_USER_PASSWORD);
+
+		if (!db.sql) {
+			return res.status(500).send('server error');
+		}
+
 		const [checkResult] = await db.sql`select obj_type_id from public.obj_types where obj_type_code = ${code as string}`.execute();
+
+		if (!db.sql) {
+			return res.status(500).send('server error');
+		}
 
 		if (!checkResult) {
 			return res.status(404).json({reason: 'type not found'});
@@ -282,7 +333,7 @@ userRouter.get('/object-data', async (req, res) => {
 			res.status(200).json([]);
 		}
 
-		const attrsList = getAttrs.map(([attr]) => attr);
+		const attrsList = getAttrs.map(([attr]: string[]) => attr);
 
 		console.log('check attrList', attrsList);
 
@@ -294,9 +345,9 @@ userRouter.get('/object-data', async (req, res) => {
 		res.status(200).json(objectData);
 	} catch (e) {
 		console.error(e);
-		res.status(500).json({reason: 'server error', errorMessage: e.message});
+		res.status(500).json({reason: 'server error', errorMessage: e});
 	} finally {
-		await db.sql.end();
+		await db.sql?.end();
 	}
 });
 
@@ -307,10 +358,18 @@ userRouter.get('/get-options', async (req, res) => {
 		return res.status(400).json({reason: 'queries is not valid'})
 	}
 
+	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
+		return res.status(500).send('not found user');
+	}
+
 	const db = new PostgresConnector();
 
 	try {
 		db.initUser(env.DB_USER_NAME, env.DB_USER_PASSWORD);
+
+		if (!db.sql) {
+			return res.status(500).send('server error');
+		}
 
 		const options = await db.sql`select
 			case attr_type
@@ -328,9 +387,9 @@ userRouter.get('/get-options', async (req, res) => {
 		res.status(200).json(options);
 	} catch (e) {
 		console.error(e);
-		res.status(500).json({reason: 'server error', errorMessage: e.message});
+		res.status(500).json({reason: 'server error', errorMessage: e});
 	} finally {
-		await db.sql.end();
+		await db.sql?.end();
 	}
 
 });
@@ -338,7 +397,6 @@ userRouter.get('/get-options', async (req, res) => {
 userRouter.post('/save', async (req, res) => {
 	const {code, objId} = req.query;
 	const fieldsData = req.body;
-	const user = req.app.get('user');
 
 	console.log('fieldsData', fieldsData);
 
@@ -346,11 +404,19 @@ userRouter.post('/save', async (req, res) => {
 		return res.status(400).json({reason: 'invalid query'});
 	}
 
+	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
+		return res.status(500).send('not found user');
+	}
+
 	const db = new PostgresConnector();
 
 	try {
 		db.initUser(env.DB_USER_NAME, env.DB_USER_PASSWORD);
 		let currentObjId = objId;
+
+		if (!db.sql) {
+			return res.status(500).send('server error');
+		}
 
 		if (!currentObjId) {
 			const [rowWithId] = await db.sql`select public.create_new_object(${code as string}) as obj_id`.execute();
@@ -369,7 +435,7 @@ userRouter.post('/save', async (req, res) => {
 		console.error(e);
 		res.status(500).json(e);
 	} finally {
-		await db.sql.end();
+		await db.sql?.end();
 	}
 });
 
@@ -381,30 +447,95 @@ userRouter.get('/actions', async (req, res) => {
 		return res.status(400).json({reason: 'invalid query'});
 	}
 
+	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
+		return res.status(500).send('not found user');
+	}
+
 	const db = new PostgresConnector();
 
 	try {
 		db.initUser(env.DB_USER_NAME, env.DB_USER_PASSWORD);
 
+		if (!db.sql) {
+			return res.status(500).send('server error');
+		}
+
+		if (!user.roleId) {
+			return res.status(500).send('user has not role id');
+		}
+
 		const sqlRes = await db.sql`select permision_type from role_permission_obj_type rp
 		join obj_types ot on rp.obj_type_id = ot.obj_type_id
 		where obj_type_code = ${code as string} and role_id = ${user.roleId} and permision_type not in ('open', 'visible');`.values();
 
-		const labels = {
+		const labels: stringIndex = {
 			edit: 'Изменить',
 			delete: 'Удалить',
 			create: 'Новая запись'
 		}
 
-		const actions = sqlRes.map(([action]) => ({name: action, label: labels[action]}));
+		const actions = sqlRes.map(([action]: string[]) => {
+			return ({name: action, label: labels[action] as string})
+		});
 
 		res.status(200).json(actions);
 	} catch (e) {
 		console.error(e);
 		res.status(500).json({reason: 'server error'});
 	} finally {
-		await db.sql.end();
+		await db.sql?.end();
 	}
 });
+
+userRouter.delete('/delete', async (req, res) => {
+	const {code, id} = req.query;
+
+	if (!code || !id) {
+		return res.status(400).json({reason: 'invalid queries'});
+	}
+
+	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
+		return res.status(500).send('not found user');
+	}
+
+	const db = new PostgresConnector();
+
+	try {
+		db.initUser(env.DB_USER_NAME, env.DB_USER_PASSWORD);
+
+		if (!db.sql) {
+			return res.status(500).send('server error');
+		}
+
+		const [resultGroup] = await db.sql`select obj_type_group from public.obj_types where obj_type_code = ${code as string}`.execute();
+
+		if (!resultGroup) {
+			res.status(404).json({reason: "not fount group"});
+		}
+
+		let table = ''
+		switch (resultGroup['obj_type_group']) {
+			case 'people' :
+				table = 'public.all_people_objects';
+				break;
+			case 'guide' :
+				table = 'public.guide_entry';
+				break;
+			default:
+				res.status(404).json('unknown group');
+		}
+
+		if (table) {
+			await db.sql`update ${db.sql(table)} set deleted = true where obj_id = ${id as string}`;
+		}
+
+		res.status(200).json({result: 'object is deleted'});
+	} catch (e) {
+		console.error(e);
+		res.status(500).json({reason: 'server error'});
+	} finally {
+		await db.sql?.end();
+	}
+})
 
 export default userRouter;

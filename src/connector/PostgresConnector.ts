@@ -1,19 +1,22 @@
 import {env} from "node:process";
-import * as postgres from "postgres";
+import postgres from "postgres";
 import * as jwt from 'jsonwebtoken';
 
 export default class PostgresConnector {
-	_host: string;
-	_port: number;
-	_database: string;
+	_host?: string;
+	_port?: number;
+	_database?: string;
 	_username: string;
 	_password: string;
-	_queries: postgres.Sql<{}>;
+	_queries?: postgres.Sql<{}>;
 
 	constructor() {
 		this._host = env.DB_HOST;
-		this._port = parseInt(env.DB_PORT);
+		this._port = env.DB_PORT ? parseInt(env.DB_PORT) : undefined;
 		this._database = env.DB_NAME;
+		this._queries = undefined
+		this._username = '';
+		this._password = '';
 	}
 
 	public initUser(login: string, password: string) {
@@ -32,7 +35,12 @@ export default class PostgresConnector {
 		}
 
 		try {
-			return jwt.verify(token, env.SECRET_KEY);
+			if (env.SECRET_KEY){
+				return jwt.verify(token, env.SECRET_KEY);
+			} else {
+				return false;
+			}
+
 		} catch (e) {
 			return false;
 		}
