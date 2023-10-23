@@ -28,19 +28,19 @@ authRouter.post('/token',async (req, res) => {
 
 	try {
 		if (!login) {
-			res.status(403);
+			res.status(400);
 			return res.json('login is empty');
 		}
 
 		if (!password) {
-			res.status(403);
+			res.status(400);
 			return res.json('password is empty');
 		}
 
 		const result = await checkPassword(login, password);
 
 		if (!result) {
-			res.status(403);
+			res.status(401);
 			return res.json('login or password incorrect');
 		}
 

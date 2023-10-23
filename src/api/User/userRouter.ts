@@ -15,7 +15,7 @@ userRouter.use(async (req, res, next) => {
 	const reqFingerprint = req.header('Fingerprint');
 
 	if (!token) {
-		return res.status(401).send();
+		return res.status(403).send();
 	}
 
 	if (!env.DB_USER_NAME || !env.DB_USER_PASSWORD) {
@@ -48,7 +48,7 @@ userRouter.use(async (req, res, next) => {
 		next();
 	} catch (e) {
 		console.error(e);
-		return res.status(401).send();
+		return res.status(403).send();
 	} finally {
 		await db.sql?.end();
 	}

@@ -10,7 +10,7 @@ dotenv.config();
 const server = express();
 const port = env.SERVER_PORT ?? 8000;
 
-const allowRegExp = /^(http:\/\/localhost:8080)|(https:\/\/curswork\.isapronov\.info)$/;
+const allowRegExp = /^(http:\/\/localhost:8080)|(http:\/\/curswork\.isapronov\.website)$/;
 
 const corsOptions: CorsOptions = {
     origin: (origin, callback) => {
